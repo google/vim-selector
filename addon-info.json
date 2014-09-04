@@ -1,0 +1,9 @@
+{
+  "name": "selector",
+  "description": "Allows launching a window to choose one of several options",
+  "author": "Google",
+  "repository": {"type": "git", "url": "git://github.com/google/vim-selector"},
+  "dependencies": {
+    "maktaba": {"type": "git", "url": "git://github.com/google/vim-maktaba"}
+  }
+}

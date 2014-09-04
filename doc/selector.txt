@@ -1,0 +1,82 @@
+*selector.txt*	Allows launching a window to choose one of several options
+                                                                    *selector*
+
+==============================================================================
+CONTENTS                                                   *selector-contents*
+  1. Introduction.............................................|selector-intro|
+  2. Configuration...........................................|selector-config|
+  3. Functions............................................|selector-functions|
+
+==============================================================================
+INTRODUCTION                                                  *selector-intro*
+
+Utility methods to provide a way to create a SelectorWindow. See
+|selector#OpenWindow()| for details.
+
+==============================================================================
+CONFIGURATION                                                *selector-config*
+
+                                                        *g:Sw_SetExtraOptions*
+Function to set extra window options.
+
+                                                              *g:Sw_SetSyntax*
+Function to set the syntax for the window.
+
+                                                           *g:sw_key_mappings*
+Additional key mappings to use in the selector window. Must have the form:
+>
+  'keyToPress' : [
+      'ActionFunction',
+      'SelectorWindowAction',
+      'Help Text']
+<
+Where the "ActionFunction" is the name of a function you specify, which takes
+exactly _two_ arguments --
+  1. The contents of the line, on which the "keyToPress" was pressed.
+  2. The contents of the entire selector buffer, minus the comments.
+
+And where the "SelectorWindowAction" must be one of the following:
+"Close" -- close the SelectorWindow before completing the action
+"Return" -- Return to previous window and keep the Selector Window open
+"NoOp" -- Peform no action (keeping the SelectorWindow open).
+
+                                                         *g:sw_max_win_height*
+Max window height [default=25]
+
+                                                         *g:sw_min_win_height*
+Min window height [default=5]
+
+==============================================================================
+FUNCTIONS                                                 *selector-functions*
+
+selector#OpenWindow({infolist}, [ResetMapper], [window_name],
+  [window_position])                                   *selector#OpenWindow()*
+  Open a selector window named [window_name] based on {infolist}, a list of
+  selector entries. Calls [ResetMapper] to initialize the buffer with key
+  mappings and syntax settings. Entries are loaded into a new buffer-window
+  located at [window_position] and window options are set using
+  |g:Sw_SetExtraOptions|.
+
+  Each entry in {infolist} may be either a line to display, or a 2-item list
+  containing [LINE, DATA]. If present, DATA will be passed to the action
+  function as a second argument.
+
+  [ResetMapper] is a function that says how to reset the function mappings. It
+  usually looks like the following:
+>
+    function! MyResetMapper()
+      let g:sw_key_mappings = {
+          \ '<CR>' : [ 'MyOpenFunc', 'Close', 'Open a file'],
+          \ 'd'    : [ 'MyDeleteFunc', 'Close', 'Delete a file']
+          \ }
+      let g:Sw_SetSyntax = 'MySyntaxResetter'
+    endfunction
+<
+  See |selector-config| for details about the different settings variables.
+
+  [ResetMapper] is "selector#NoOp" if omitted.
+  [window_name] is "__SelectorWindow__" if omitted.
+  [window_position] is "botright" if omitted.
+
+
+vim:tw=78:ts=8:ft=help:norl:
