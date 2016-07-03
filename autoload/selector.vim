@@ -14,68 +14,42 @@
 
 ""
 " @section Introduction, intro
+" @library
 " Utility methods to provide a way to create a SelectorWindow. See
 " @function(#OpenWindow) for details.
 
 let s:QUIT_KEY = 'q'
 let s:HELP_KEY = 'H'
 
-" This defines the Default SelectorWindow configuration.
+if !exists('s:selectors_by_bufnum')
+  let s:selectors_by_bufnum = {}
+endif
+
+" Clears out special global variables which legacy ResetMapper func can use to
+" configure the selector.
 " This is called on every selector#OpenWindow call.
-function! s:SetDefaultGlobalMappings() abort
-  ""
-  " Function to set extra window options.
-  let g:Sw_SetExtraOptions = 's:DefaultExtraOptions'
-  ""
-  " Function to set the syntax for the window.
-  let g:Sw_SetSyntax = 's:DefaultSetSyntax'
-  ""
-  " Additional key mappings to use in the selector window. Must have the form:
-  " >
-  "   'keyToPress' : [
-  "       'ActionFunction',
-  "       'SelectorWindowAction',
-  "       'Help Text']
-  " <
-  " Where the "ActionFunction" is the name of a function you specify, which
-  " takes exactly _two_ arguments --
-  "  1. The contents of the line, on which the "keyToPress" was pressed.
-  "  2. The contents of the entire selector buffer, minus the comments.
-  "
-  " And where the "SelectorWindowAction" must be one of the following:
-  "  - "Close" -- close the SelectorWindow before completing the action
-  "  - "Return" -- Return to previous window and keep the Selector Window open
-  "  - "NoOp" -- Peform no action (keeping the SelectorWindow open).
-  let g:sw_key_mappings = {}
-  ""
-  " Max window height [default=25]
-  let g:sw_max_win_height = 25
-  ""
-  " Min window height [default=5]
-  let g:sw_min_win_height = 5
+function! s:ResetDefaultGlobalMappings() abort
+  unlet! g:Sw_SetExtraOptions
+  unlet! g:Sw_SetSyntax
+  unlet! g:sw_key_mappings
+  unlet! g:sw_max_win_height
+  unlet! g:sw_min_win_height
 endfunction
 
 " The default keymappings.
 function! s:GetDefaultKeyMappings() abort
   return {
       \ '<CR>' : ['s:DefaultAfterKey', 'Close', 'Do something'],
-      \ s:HELP_KEY : ['s:ToggleHelp', 'NoOp', 'Toggle the help messages'],
+      \ s:HELP_KEY : [
+          \ 'selector#ToggleCurrentHelp',
+          \ 'NoOp',
+          \ 'Toggle verbose help messages'],
       \ s:QUIT_KEY : ['selector#NoOp', 'Close', 'Close the window']
       \ }
 endfunction
 
-" Create the function refs in Vim.
-function! s:CreateFunctionRefs() abort
-  " Due to the below error, either, we need to unlet, or do a try-catch
-  " Patch 7.2.402
-  " Problem:  This gives a #705 error: let X = function('haslocaldir')
-  "           let X = function('getcwd')
-  call s:InitFunctionVariable('g:Sw_SetExtraOptions')
-  call s:InitFunctionVariable('g:Sw_SetSyntax')
-endfunction
-
-" Create the full_key_mappings dict.
-function! s:InitKeyMappings(mappings) abort
+" Create the full key mappings dict.
+function! s:ExpandedKeyMappings(mappings) abort
   let l:window_action_mapping = {
       \ 'Close' : 'selector#CloseWindow',
       \ 'Return' : 'selector#ReturnToWindow',
@@ -86,33 +60,24 @@ function! s:InitKeyMappings(mappings) abort
   "   - the window action
   "   - the help item
   "   - the actual key press (with the brackets)
-  let s:full_key_mappings = {}
+  let l:expanded_mappings = {}
   for l:keypress in keys(a:mappings)
-    let l:items = a:mappings[keypress]
+    let l:items = a:mappings[l:keypress]
     " Check if the keypress is just left or right pointies (<>)
     let l:scrubbed = l:keypress
     if l:keypress =~# '\m<\|>'
       " Left and right pointies must be scrubbed -- they have special meaning
       " when used in the context of creating key mappings, which is where the
       " scrubbed keypresses are used.
-      let l:scrubbed = substitute(substitute(keypress, '<', '_Gr', 'g'),
+      let l:scrubbed = substitute(substitute(l:keypress, '<', '_Gr', 'g'),
           \ '>', '_Ls', 'g')
     endif
     let l:window_action = get(l:window_action_mapping,
         \ l:items[1], l:items[1])
-    let s:full_key_mappings[l:scrubbed] =
+    let l:expanded_mappings[l:scrubbed] =
         \ [l:items[0], l:window_action, l:items[2], l:keypress]
   endfor
-endfunction
-
-" Make a first class function and return the function variable.
-function! s:InitFunctionVariable(func_prefix) abort
-  let l:funcvar = a:func_prefix . '_func'
-  if exists(l:funcvar)
-    unlet {l:funcvar}
-  endif
-  let {l:funcvar} = function({a:func_prefix})
-  return l:funcvar
+  return l:expanded_mappings
 endfunction
 
 ""
@@ -142,57 +107,129 @@ function! s:SplitLinesAndData(infolist) abort
 endfunction
 
 
+function! s:DoLegacyConfig(selector, ApplyLegacyConfig) dict abort
+  " Reset the defaults.
+  call s:ResetDefaultGlobalMappings()
+  call maktaba#function#Call(a:ApplyLegacyConfig)
+  return a:selector
+      \ .SetSyntax(function(g:Sw_SetSyntax))
+      \ .WithExtraOptions(function(g:Sw_SetExtraOptions))
+endfunction
+
+
+""
+" @dict Selector
+" Representation of a set of data for a user to select from, e.g. list of files.
+" It can be created with @function(#Create), configured with syntax
+" highlighting, key mappings, etc. and shown as a vim window.
+
+
 ""
 " @public
-" @usage {infolist} [ResetMapper] [window_name] [window_position]
-" Open a selector window named [window_name] based on {infolist}, a list of
-" selector entries. Calls [ResetMapper] to initialize the buffer with key
-" mappings and syntax settings. Entries are loaded into a new buffer-window
-" located at [window_position] and window options are set using
-" @setting(g:Sw_SetExtraOptions).
+" Creates a @dict(Selector) from {infolist} that can be configured and shown.
 "
 " Each entry in {infolist} may be either a line to display, or a 2-item list
-" containing [LINE, DATA]. If present, DATA will be passed to the action
+" containing `[LINE, DATA]`. If present, DATA will be passed to the action
 " function as a second argument.
-"
-" [ResetMapper] is a function that says how to reset the function mappings. It
-" usually looks like the following:
-" >
-"   function! MyResetMapper()
-"     let g:sw_key_mappings = {
-"         \ '<CR>' : [ 'MyOpenFunc', 'Close', 'Open a file'],
-"         \ 'd'    : [ 'MyDeleteFunc', 'Close', 'Delete a file']
-"         \ }
-"     let g:Sw_SetSyntax = 'MySyntaxResetter'
-"   endfunction
+function! selector#Create(infolist) abort
+  let l:selector = {
+      \ '_infolist': a:infolist,
+      \ '_name': '__SelectorWindow__',
+      \ '_is_verbose': 0,
+      \ '_ApplySyntax': function('selector#DefaultSetSyntax'),
+      \ '_ApplyExtraOptions': function('selector#DefaultExtraOptions'),
+      \ '_GetHelpLines': function('selector#DoGetHelpLines'),
+      \ 'WithMappings': function('selector#DoWithMappings'),
+      \ 'WithSyntax': function('selector#DoWithSyntax'),
+      \ 'WithExtraOptions': function('selector#DoWithExtraOptions'),
+      \ 'WithName': function('selector#DoWithName'),
+      \ 'Show': function('selector#DoShow'),
+      \ 'ToggleHelp': function('selector#DoToggleHelp'),
+      \ '_GetLineData': function('selector#DoGetLineData')}
+  return l:selector.WithMappings({})
+endfunction
+
+
+""
+" @dict Selector.WithMappings
+" Set {keymappings} to use in the selector window. Must have the form: >
+"   'keyToPress': [
+"       ActionFunction({line}, [datum]),
+"       'SelectorWindowAction',
+"       'Help Text']
 " <
-" See @section(config) for details about the different settings variables.
+" Where the "ActionFunction" is the name of a function you specify, which
+" takes one or two arguments:
+"   1. line: The contents of the line on which the "keyToPress" was pressed.
+"   2. datum: data associated with the line when selector was created, if line
+"      was initialized as a 2-item list.
 "
-" @default ResetMapper="selector#NoOp"
-" @default window_name="__SelectorWindow__"
-" @default window_position="botright"
-function! selector#OpenWindow(infolist, ...) abort
-  let l:ResetMapper = maktaba#ensure#IsCallable(get(a:, 1, 'selector#NoOp'))
-  let l:window_name = maktaba#ensure#IsString(get(a:, 2, '__SelectorWindow__'))
-  let l:window_position = maktaba#ensure#IsString(get(a:, 3, 'botright'))
-
-  " Reset the defaults.
-  call s:SetDefaultGlobalMappings()
-  " Initialize the user's variables.
-  call call(function(l:ResetMapper), [])
-
+" And where the "SelectorWindowAction" must be one of the following:
+"  - "Close" -- close the SelectorWindow before completing the action
+"  - "Return" -- Return to previous window and keep the Selector Window open
+"  - "NoOp" -- Perform no action (keeping the SelectorWindow open).
+function! selector#DoWithMappings(keymappings) dict abort
+  let l:custom_mappings = maktaba#ensure#IsDict(a:keymappings)
   let l:mappings = extend(
-      \ s:GetDefaultKeyMappings(), g:sw_key_mappings, 'force')
-  call s:InitKeyMappings(l:mappings)
-  call s:CreateFunctionRefs()
+      \ s:GetDefaultKeyMappings(), l:custom_mappings, 'force')
+  let self._mappings = s:ExpandedKeyMappings(l:mappings)
+  return self
+endfunction
+
+
+""
+" @dict Selector.WithSyntax
+" Configures an {ApplySyntax} function to be called in the selector window.
+" This will by applied in addition to standard syntax rules for rendering the
+" help header, etc.
+function! selector#DoWithSyntax(ApplySyntax) dict abort
+  let self._ApplySyntax = maktaba#ensure#IsCallable(a:ApplySyntax)
+  return self
+endfunction
+
+
+""
+" @dict Selector.WithExtraOptions
+" Configures {ApplyExtraOptions} for additional window-local settings for
+" selector window.
+" If not configured, the default extra options just disable 'number'.
+function! selector#DoWithExtraOptions(ApplyExtraOptions) dict abort
+  let self._ApplyExtraOptions = maktaba#ensure#IsCallable(a:ApplyExtraOptions)
+  return self
+endfunction
+
+
+""
+" @dict Selector.WithName
+" Configures {name} to show as the window name on the selector.
+" If not configured, the default name is "__SelectorWindow__".
+function! selector#DoWithName(name) dict abort
+  let self._name = maktaba#ensure#IsString(a:name)
+  return self
+endfunction
+
+
+""
+" @dict Selector.Show
+" Shows a selector window for the @dict(Selector) with [minheight], [maxheight],
+" and [position].
+" @default minheight=5
+" @default maxheight=25
+" @default position='botright'
+function! selector#DoShow(...) dict abort
+  let l:min_win_height = (a:0 >= 1 && a:1 isnot -1) ?
+      \ maktaba#ensure#IsNumber(a:1) : 5
+  let l:max_win_height = (a:0 >= 2 && a:2 isnot -1) ?
+      \ maktaba#ensure#IsNumber(a:2) : 25
+  let l:position = maktaba#ensure#IsString(get(a:, 3, 'botright'))
 
   " Show one empty line at the bottom of the window.
   " (2 is correct -- I know it looks bizarre)
-  let l:win_size = len(a:infolist) + 2
-  if l:win_size > g:sw_max_win_height
-    let l:win_size = g:sw_max_win_height
-  elseif l:win_size < g:sw_min_win_height
-    let l:win_size = g:sw_min_win_height
+  let l:win_size = len(self._infolist) + 2
+  if l:win_size > l:max_win_height
+    let l:win_size = l:max_win_height
+  elseif l:win_size < l:min_win_height
+    let l:win_size = l:min_win_height
   endif
 
   let s:current_savedview = winsaveview()
@@ -201,30 +238,102 @@ function! selector#OpenWindow(infolist, ...) abort
 
   " Open the window in the specified window position.  Typically, this opens up
   " a flat window on the bottom (as with split).
-  execute l:window_position . ' ' . l:win_size . 'new'
-  call s:SetWindowOptions()
-  silent execute 'file ' . l:window_name
-  let [l:lines, l:data] = s:SplitLinesAndData(a:infolist)
+  execute l:position l:win_size 'new'
+  let s:selectors_by_bufnum[bufnr('%')] = self
+  call s:SetWindowOptions(self)
+  silent execute 'file' self._name
+  let [l:lines, l:data] = s:SplitLinesAndData(self._infolist)
   let b:selector_lines_data = l:data
-  call s:InstantiateKeyMaps()
+  call s:InstantiateKeyMaps(self._mappings)
   setlocal noreadonly
   setlocal modifiable
-  let s:verbose_help = 0
   call maktaba#buffer#Overwrite(1, line('$'), l:lines)
   " Add the help comments at the top (do this last so cursor stays below it).
-  call append(0, s:GetHelpLines(0))
+  call append(0, self._GetHelpLines())
   setlocal readonly
   setlocal nomodifiable
 
   " Restore the previous windows view
-  let buffer_window = winnr()
+  let l:buffer_window = winnr()
   call selector#ReturnToWindow()
   call winrestview(s:current_savedview)
-  execute buffer_window  . 'wincmd w'
+  execute l:buffer_window  'wincmd w'
+
+  return self
+endfunction
+
+
+""
+" @private
+" Gets data associated with {lineno}, as passed in 2-item form of infolist when
+" creating a selector with @function(#Create).
+" @throws NotFound if no data was configured for requested line.
+function! selector#DoGetLineData(lineno) dict abort
+  let l:lineno = a:lineno - len(self._GetHelpLines())
+  if has_key(b:selector_lines_data, l:lineno)
+    return b:selector_lines_data[l:lineno]
+  endif
+  throw maktaba#error#NotFound('Associated data for selector line %d', l:lineno)
+endfunction
+
+
+""
+" @public
+" @usage {infolist} [ResetMapper] [window_name] [window_position]
+" WARNING: This is a legacy function and will soon be deprecated and removed.
+" Open a selector window named [window_name] based on {infolist}, a list of
+" selector entries.
+"
+" Each entry in {infolist} may be either a line to display, or a 2-item list
+" containing [LINE, DATA]. If present, DATA will be passed to the action
+" function as a second argument.
+"
+" Entries are loaded into a new buffer-window located at [window_position], with
+" mappings loaded from `g:sw_key_mappings`, syntax applied via `g:Sw_SetSyntax`,
+" and window options applied using `g:Sw_SetExtraOptions`.
+"
+" [ResetMapper] is a function that says how to configure the selector with key
+" mappings and syntax settings via special variables `g:Sw_SetSyntax`,
+" `g:Sw_SetExtraOptions`, `g:sw_key_mappings`, `g:sw_min_win_height`, and
+" `g:sw_max_win_height`. (These special variables are actually local to the
+" selector and are cleared out before opening a new selector.)
+"
+" [ResetMapper] usually looks like the following: >
+"   function! MyResetMapper()
+"     let g:sw_key_mappings = {
+"         \ '<CR>' : [ 'MyOpenFunc', 'Close', 'Open a file'],
+"         \ 'd'    : [ 'MyDeleteFunc', 'Close', 'Delete a file']
+"         \ }
+"     let g:Sw_SetSyntax = 'MySyntaxResetter'
+"   endfunction
+" <
+"
+" @default window_name="__SelectorWindow__"
+" @default window_position="botright"
+function! selector#OpenWindow(infolist, ...) abort
+  let l:selector = selector#Create(a:infolist)
+  if a:0 >= 1
+    let l:ResetMapper = maktaba#ensure#IsCallable(a:1)
+    call s:DoLegacyConfig(l:selector, l:ResetMapper)
+  endif
+  if a:0 >= 2
+    call l:selector.WithName(maktaba#ensure#IsString(a:2))
+  endif
+  if has_key(g:, 'sw_key_mappings')
+    call l:selector.WithMappings(g:sw_key_mappings)
+  endif
+  let l:min_win_height = get(g:, 'sw_min_win_height', -1)
+  let l:max_win_height = get(g:, 'sw_max_win_height', -1)
+  if a:0 >= 3
+    let l:window_position = maktaba#ensure#IsString(a:3)
+    call l:selector.Show(l:min_win_height, l:max_win_height, l:window_position)
+  else
+    call l:selector.Show(l:min_win_height, l:max_win_height)
+  endif
 endfunction
 
 " Set the Window Options for the created window.
-function! s:SetWindowOptions() abort
+function! s:SetWindowOptions(selector) abort
   if v:version >= 700
     setlocal buftype=nofile
     setlocal bufhidden=delete
@@ -235,11 +344,9 @@ function! s:SetWindowOptions() abort
     setlocal nomodifiable
     setlocal nospell
   endif
-  call call(g:Sw_SetExtraOptions_func, [])
+  call maktaba#function#Call(a:selector._ApplyExtraOptions)
   if has('syntax')
-    if exists('g:Sw_SetSyntax')
-      call call(g:Sw_SetSyntax_func, [])
-    endif
+    call maktaba#function#Call(a:selector._ApplySyntax)
     call s:BaseSyntax()
   endif
 endfunction
@@ -258,14 +365,15 @@ function! s:CommentLines(str)
 endfunction
 
 ""
+" @private
 " Get a list of header lines for the selector window that will be displayed as
-" comments at the top. Documents all key mappings if {verbose} is 1, otherwise
-" just documents that H toggles help.
-function! s:GetHelpLines(verbose) abort
-  if a:verbose
+" comments at the top. Documents all key mappings if `self.verbose` is 1,
+" otherwise just documents that H toggles help.
+function! selector#DoGetHelpLines() dict abort
+  if self._is_verbose
     " Map from comments to keys.
     let l:comments_keys = {}
-    for l:items in values(s:full_key_mappings)
+    for l:items in values(self._mappings)
       let l:keycomment = l:items[2]
       let l:key = l:items[3]
       if has_key(l:comments_keys, l:keycomment)
@@ -285,8 +393,8 @@ function! s:GetHelpLines(verbose) abort
 
     let l:lines = []
     for l:key in sort(keys(l:keys_comments))
-      call extend(l:lines, s:CommentLines( '' . l:key . "\t: "
-          \ . l:keys_comments[l:key]))
+      call extend(l:lines,
+          \ s:CommentLines(printf('%s\t: %s', l:key, l:keys_comments[l:key])))
     endfor
     return l:lines
   else
@@ -294,22 +402,33 @@ function! s:GetHelpLines(verbose) abort
   endif
 endfunction
 
-function! s:ToggleHelp(...) abort
+""
+" @private
+function! selector#ToggleCurrentHelp(...) abort
+  let l:selector = s:selectors_by_bufnum[bufnr('%')]
+  call l:selector.ToggleHelp()
+endfunction
+
+""
+" @dict Selector.ToggleHelp
+" Toggle whether verbose help is shown for the selector.
+function! selector#DoToggleHelp() dict abort
+  " TODO(dbarnett): Don't modify buffer if none exists.
   let l:prev_read = &readonly
   let l:prev_mod = &modifiable
   setlocal noreadonly
   setlocal modifiable
-  let l:len_help = len(s:GetHelpLines(s:verbose_help))
-  let s:verbose_help = !s:verbose_help
-  call maktaba#buffer#Overwrite(1, l:len_help, s:GetHelpLines(s:verbose_help))
+  let l:len_help = len(self._GetHelpLines())
+  let self._is_verbose = !self._is_verbose
+  call maktaba#buffer#Overwrite(1, l:len_help, self._GetHelpLines())
   let &readonly = l:prev_read
   let &modifiable = l:prev_mod
 endfunction
 
 " Initialize the key bindings
-function! s:InstantiateKeyMaps() abort
-  for l:scrubbed_key in keys(s:full_key_mappings)
-    let l:items = s:full_key_mappings[l:scrubbed_key]
+function! s:InstantiateKeyMaps(mappings) abort
+  for l:scrubbed_key in keys(a:mappings)
+    let l:items = a:mappings[l:scrubbed_key]
     let l:actual_key = l:items[3]
     let l:mapping = 'nnoremap <buffer> <silent> ' . l:actual_key
         \ . " :call selector#KeyCall('" . l:scrubbed_key . "')<CR>"
@@ -317,7 +436,9 @@ function! s:InstantiateKeyMaps() abort
   endfor
 endfunction
 
-function! s:DefaultExtraOptions()
+""
+" @private
+function! selector#DefaultExtraOptions() abort
   setlocal nonumber
 endfunction
 
@@ -336,36 +457,42 @@ function! s:BaseSyntax() abort
   highlight default link SelectorKey3 Keyword
 endfunction
 
-"The default syntax function.  Mostly, this exists to test that setting-syntax
-"works, and it's expected that this will be overwritten
-function! s:DefaultSetSyntax()
+""
+" @private
+" The default syntax function.  Mostly, this exists to test that setting-syntax
+" works, and it's expected that this will be overwritten
+function! selector#DefaultSetSyntax() abort
   syntax match filepart '/\?\(\w*/\)*\w*' nextgroup=javaext
   syntax match javaext '[.][a-z]*$'
   highlight default link filepart Directory
   highlight default link javaext Function
 endfunction
 
+""
+" @private
 " Perform the key action.
 "
-" The scrubbed_key allows us to retrieve the original key.
+" The {scrubbed_key} allows us to retrieve the original key.
 function! selector#KeyCall(scrubbed_key) abort
+  let l:selector = s:selectors_by_bufnum[bufnr('%')]
   let l:contents = getline('.')
-  let l:action_func = s:full_key_mappings[a:scrubbed_key][0]
-  let l:window_func = s:full_key_mappings[a:scrubbed_key][1]
+  let l:action_func = l:selector._mappings[a:scrubbed_key][0]
+  let l:window_func = l:selector._mappings[a:scrubbed_key][1]
   if l:contents[0] ==# '"' &&
       \ a:scrubbed_key !=# s:QUIT_KEY
       \ && a:scrubbed_key !=# s:HELP_KEY
     return
   endif
-  let l:lineno = line('.') - len(s:GetHelpLines(s:verbose_help))
-  if has_key(b:selector_lines_data, l:lineno)
-    let l:datum = b:selector_lines_data[l:lineno]
-  endif
-  call call(l:window_func, [])
+  try
+    let l:datum = l:selector._GetLineData(line('.'))
+  catch /ERROR(NotFound):/
+    " No data associated with line. Ignore and leave l:datum undefined.
+  endtry
+  call maktaba#function#Call(l:window_func)
   if exists('l:datum')
-    call call(l:action_func, [l:contents, l:datum])
+    call maktaba#function#Call(l:action_func, [l:contents, l:datum])
   else
-    call call(l:action_func, [l:contents])
+    call maktaba#function#Call(l:action_func, [l:contents])
   endif
 endfunction
 
@@ -374,12 +501,16 @@ function! s:DefaultAfterKey(line, ...) abort
   execute 'edit ' . a:line
 endfunction
 
+""
+" @private
 " Close the window and return to the initial-calling window.
 function! selector#CloseWindow() abort
   bdelete
   call selector#ReturnToWindow()
 endfunction
 
+""
+" @private
 " Return the user to the previous window
 function! selector#ReturnToWindow() abort
   execute s:last_winnum . 'wincmd w'
@@ -387,6 +518,8 @@ function! selector#ReturnToWindow() abort
   call winrestview(s:current_savedview)
 endfunction
 
+""
+" @private
 " A default function
-function! selector#NoOp(...)
+function! selector#NoOp(...) abort
 endfunction

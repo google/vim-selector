@@ -1,10 +1,10 @@
 *selector.txt*	Allows launching a window to choose one of several options
-                                                                    *selector*
+Google                                                              *selector*
 
 ==============================================================================
 CONTENTS                                                   *selector-contents*
   1. Introduction.............................................|selector-intro|
-  2. Configuration...........................................|selector-config|
+  2. Dictionaries.............................................|selector-dicts|
   3. Functions............................................|selector-functions|
 
 ==============================================================================
@@ -14,55 +14,88 @@ Utility methods to provide a way to create a SelectorWindow. See
 |selector#OpenWindow()| for details.
 
 ==============================================================================
-CONFIGURATION                                                *selector-config*
+DICTIONARIES                                                  *selector-dicts*
 
-                                                        *g:Sw_SetExtraOptions*
-Function to set extra window options.
+                                                           *selector.Selector*
+Representation of a set of data for a user to select from, e.g. list of files.
+It can be created with |selector#Create()|, configured with syntax
+highlighting, key mappings, etc. and shown as a vim window.
 
-                                                              *g:Sw_SetSyntax*
-Function to set the syntax for the window.
-
-                                                           *g:sw_key_mappings*
-Additional key mappings to use in the selector window. Must have the form:
+Selector.WithMappings({keymappings})                 *Selector.WithMappings()*
+  Set {keymappings} to use in the selector window. Must have the form:
 >
-  'keyToPress' : [
-      'ActionFunction',
-      'SelectorWindowAction',
-      'Help Text']
+    'keyToPress': [
+        ActionFunction({line}, [datum]),
+        'SelectorWindowAction',
+        'Help Text']
 <
-Where the "ActionFunction" is the name of a function you specify, which takes
-exactly _two_ arguments --
-  1. The contents of the line, on which the "keyToPress" was pressed.
-  2. The contents of the entire selector buffer, minus the comments.
+  Where the "ActionFunction" is the name of a function you specify, which
+  takes one or two arguments:
+    1. line: The contents of the line on which the "keyToPress" was pressed.
+    2. datum: data associated with the line when selector was created, if line
+      was initialized as a 2-item list.
 
-And where the "SelectorWindowAction" must be one of the following:
-"Close" -- close the SelectorWindow before completing the action
-"Return" -- Return to previous window and keep the Selector Window open
-"NoOp" -- Peform no action (keeping the SelectorWindow open).
+  And where the "SelectorWindowAction" must be one of the following:
+  "Close" -- close the SelectorWindow before completing the action
+  "Return" -- Return to previous window and keep the Selector Window open
+  "NoOp" -- Perform no action (keeping the SelectorWindow open).
 
-                                                         *g:sw_max_win_height*
-Max window height [default=25]
+Selector.WithSyntax({ApplySyntax})                     *Selector.WithSyntax()*
+  Configures an {ApplySyntax} function to be called in the selector window.
+  This will by applied in addition to standard syntax rules for rendering the
+  help header, etc.
 
-                                                         *g:sw_min_win_height*
-Min window height [default=5]
+Selector.WithExtraOptions({ApplyExtraOptions})   *Selector.WithExtraOptions()*
+  Configures {ApplyExtraOptions} for additional window-local settings for
+  selector window. If not configured, the default extra options just disable
+  'number'.
+
+Selector.WithName({name})                                *Selector.WithName()*
+  Configures {name} to show as the window name on the selector. If not
+  configured, the default name is "__SelectorWindow__".
+
+Selector.Show([minheight], [maxheight], [position])          *Selector.Show()*
+  Shows a selector window for the |selector.Selector| with [minheight],
+  [maxheight], and [position].
+  [minheight] is 5 if omitted.
+  [maxheight] is 25 if omitted.
+  [position] is 'botright' if omitted.
+
+Selector.ToggleHelp()                                  *Selector.ToggleHelp()*
+  Toggle whether verbose help is shown for the selector.
 
 ==============================================================================
 FUNCTIONS                                                 *selector-functions*
 
+selector#Create({infolist})                                *selector#Create()*
+  Creates a |selector.Selector| from {infolist} that can be configured and
+  shown.
+
+  Each entry in {infolist} may be either a line to display, or a 2-item list
+  containing `[LINE, DATA]`. If present, DATA will be passed to the action
+  function as a second argument.
+
 selector#OpenWindow({infolist}, [ResetMapper], [window_name],
   [window_position])                                   *selector#OpenWindow()*
+  WARNING: This is a legacy function and will soon be deprecated and removed.
   Open a selector window named [window_name] based on {infolist}, a list of
-  selector entries. Calls [ResetMapper] to initialize the buffer with key
-  mappings and syntax settings. Entries are loaded into a new buffer-window
-  located at [window_position] and window options are set using
-  |g:Sw_SetExtraOptions|.
+  selector entries.
 
   Each entry in {infolist} may be either a line to display, or a 2-item list
   containing [LINE, DATA]. If present, DATA will be passed to the action
   function as a second argument.
 
-  [ResetMapper] is a function that says how to reset the function mappings. It
-  usually looks like the following:
+  Entries are loaded into a new buffer-window located at [window_position],
+  with mappings loaded from `g:sw_key_mappings`, syntax applied via
+  `g:Sw_SetSyntax`, and window options applied using `g:Sw_SetExtraOptions`.
+
+  [ResetMapper] is a function that says how to configure the selector with key
+  mappings and syntax settings via special variables `g:Sw_SetSyntax`,
+  `g:Sw_SetExtraOptions`, `g:sw_key_mappings`, `g:sw_min_win_height`, and
+  `g:sw_max_win_height`. (These special variables are actually local to the
+  selector and are cleared out before opening a new selector.)
+
+  [ResetMapper] usually looks like the following:
 >
     function! MyResetMapper()
       let g:sw_key_mappings = {
@@ -72,9 +105,7 @@ selector#OpenWindow({infolist}, [ResetMapper], [window_name],
       let g:Sw_SetSyntax = 'MySyntaxResetter'
     endfunction
 <
-  See |selector-config| for details about the different settings variables.
 
-  [ResetMapper] is "selector#NoOp" if omitted.
   [window_name] is "__SelectorWindow__" if omitted.
   [window_position] is "botright" if omitted.
 

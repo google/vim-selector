@@ -37,13 +37,6 @@ Next, define the function that controls syntax highlighting for the new buffer.
   |  hi def link extension Special<CR>
   |endfunction
 
-Finally, define the function that will initialize the selector state.
-
-  :function HandleResetState() abort<CR>
-  |  let g:sw_key_mappings = g:example_keys<CR>
-  |  let g:Sw_SetSyntax = 'HandleResetSyntax'<CR>
-  |endfunction<CR>
-
 Let's put some text in the default buffer so we can tell when we switch between
 buffers easily.
 
@@ -52,11 +45,14 @@ buffers easily.
   @end
 
 
-Now we can use selector#OpenWindow to create a new buffer with multiple lines
+Now we can use selector#Create to create a new buffer with multiple lines
 that can be selected.
 
-  :call selector#OpenWindow(["one/one.1", "two/two.2", "three/three.3"],
-  |  'HandleResetState', 'Window_Name', 'botright')
+  :let g:lines = ["one/one.1", "two/two.2", "three/three.3"]
+  :let g:selector =  selector#Create(g:lines)
+  |.WithMappings(g:example_keys).WithSyntax(function('HandleResetSyntax'))
+  |.WithName('Window_Name')
+  |.Show()
   " Press 'H' for more options.
   one/one.1
   two/two.2
