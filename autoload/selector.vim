@@ -21,8 +21,8 @@
 let s:QUIT_KEY = 'q'
 let s:HELP_KEY = 'H'
 
-if !exists('s:selectors_by_bufnum')
-  let s:selectors_by_bufnum = {}
+if !exists('s:selectors_by_buffer_number')
+  let s:selectors_by_buffer_number = {}
 endif
 
 " Clears out special global variables which legacy ResetMapper func can use to
@@ -239,7 +239,7 @@ function! selector#DoShow(...) dict abort
   " Open the window in the specified window position.  Typically, this opens up
   " a flat window on the bottom (as with split).
   execute l:position l:win_size 'new'
-  let s:selectors_by_bufnum[bufnr('%')] = self
+  let s:selectors_by_buffer_number[bufnr('%')] = self
   call s:SetWindowOptions(self)
   silent execute 'file' self._name
   let [l:lines, l:data] = s:SplitLinesAndData(self._infolist)
@@ -405,7 +405,7 @@ endfunction
 ""
 " @private
 function! selector#ToggleCurrentHelp(...) abort
-  let l:selector = s:selectors_by_bufnum[bufnr('%')]
+  let l:selector = s:selectors_by_buffer_number[bufnr('%')]
   call l:selector.ToggleHelp()
 endfunction
 
@@ -474,7 +474,7 @@ endfunction
 "
 " The {scrubbed_key} allows us to retrieve the original key.
 function! selector#KeyCall(scrubbed_key) abort
-  let l:selector = s:selectors_by_bufnum[bufnr('%')]
+  let l:selector = s:selectors_by_buffer_number[bufnr('%')]
   let l:contents = getline('.')
   let l:action_func = l:selector._mappings[a:scrubbed_key][0]
   let l:window_func = l:selector._mappings[a:scrubbed_key][1]
