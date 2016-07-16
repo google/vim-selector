@@ -107,13 +107,17 @@ function! s:SplitLinesAndData(infolist) abort
 endfunction
 
 
-function! s:DoLegacyConfig(selector, ApplyLegacyConfig) dict abort
+function! s:DoLegacyConfig(selector, ApplyLegacyConfig) abort
   " Reset the defaults.
   call s:ResetDefaultGlobalMappings()
   call maktaba#function#Call(a:ApplyLegacyConfig)
+  if exists('g:Sw_SetSyntax')
+    call a:selector.WithSyntax(function(g:Sw_SetSyntax))
+  endif
+  if exists('g:Sw_SetExtraOptions')
+    call a:selector.WithExtraOptions(function(g:Sw_SetExtraOptions))
+  endif
   return a:selector
-      \ .SetSyntax(function(g:Sw_SetSyntax))
-      \ .WithExtraOptions(function(g:Sw_SetExtraOptions))
 endfunction
 
 
