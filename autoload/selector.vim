@@ -1,4 +1,4 @@
-" Copyright 2015 Google Inc. All rights reserved.
+" Copyright 2017 Google Inc. All rights reserved.
 "
 " Licensed under the Apache License, Version 2.0 (the "License");
 " you may not use this file except in compliance with the License.
@@ -12,12 +12,6 @@
 " See the License for the specific language governing permissions and
 " limitations under the License.
 
-""
-" @section Introduction, intro
-" @library
-" Utility methods to provide a way to create a SelectorWindow. See
-" @function(#OpenWindow) for details.
-
 let s:QUIT_KEY = 'q'
 let s:HELP_KEY = 'H'
 
@@ -25,21 +19,11 @@ if !exists('s:selectors_by_buffer_number')
   let s:selectors_by_buffer_number = {}
 endif
 
-" Clears out special global variables which legacy ResetMapper func can use to
-" configure the selector.
-" This is called on every selector#OpenWindow call.
-function! s:ResetDefaultGlobalMappings() abort
-  unlet! g:Sw_SetExtraOptions
-  unlet! g:Sw_SetSyntax
-  unlet! g:sw_key_mappings
-  unlet! g:sw_max_win_height
-  unlet! g:sw_min_win_height
-endfunction
 
 " The default keymappings.
 function! s:GetDefaultKeyMappings() abort
   return {
-      \ '<CR>' : ['s:DefaultAfterKey', 'Close', 'Do something'],
+      \ '<CR>' : ['selector#NoOp', 'Close', 'Do something'],
       \ s:HELP_KEY : [
           \ 'selector#ToggleCurrentHelp',
           \ 'NoOp',
@@ -47,6 +31,7 @@ function! s:GetDefaultKeyMappings() abort
       \ s:QUIT_KEY : ['selector#NoOp', 'Close', 'Close the window']
       \ }
 endfunction
+
 
 " Create the full key mappings dict.
 function! s:ExpandedKeyMappings(mappings) abort
@@ -80,6 +65,7 @@ function! s:ExpandedKeyMappings(mappings) abort
   return l:expanded_mappings
 endfunction
 
+
 ""
 " Unzips {infolist}, a list of selector entries, into line text and data.
 " Each selector entry may be either a string, or a pair (LINE, DATA) stored in a
@@ -107,17 +93,59 @@ function! s:SplitLinesAndData(infolist) abort
 endfunction
 
 
-function! s:DoLegacyConfig(selector, ApplyLegacyConfig) abort
-  " Reset the defaults.
-  call s:ResetDefaultGlobalMappings()
-  call maktaba#function#Call(a:ApplyLegacyConfig)
-  if exists('g:Sw_SetSyntax')
-    call a:selector.WithSyntax(function(g:Sw_SetSyntax))
+" Set the Window Options for the created window.
+function! s:SetWindowOptions(selector) abort
+  if v:version >= 700
+    setlocal buftype=nofile
+    setlocal bufhidden=delete
+    setlocal noswapfile
+    setlocal readonly
+    setlocal cursorline
+    setlocal nolist
+    setlocal nomodifiable
+    setlocal nospell
   endif
-  if exists('g:Sw_SetExtraOptions')
-    call a:selector.WithExtraOptions(function(g:Sw_SetExtraOptions))
+  call maktaba#function#Call(a:selector._ApplyExtraOptions)
+  if has('syntax')
+    call maktaba#function#Call(a:selector._ApplySyntax)
+    call s:BaseSyntax()
   endif
-  return a:selector
+endfunction
+
+
+" Comment out lines -- used in creating help text
+function! s:CommentLines(str)
+  let l:out = []
+  for l:comment_lines in split(a:str, '\n')
+    if l:comment_lines[0] ==# '"'
+      call add(l:out, l:comment_lines)
+    else
+      call add(l:out, '" ' . l:comment_lines)
+    endif
+  endfor
+  return l:out
+endfunction
+
+
+" The base syntax defines the comment syntax in the selector window, which is
+" used for the Help menus.
+function! s:BaseSyntax() abort
+  syntax region SelectorComment start='^"' end='$'
+      \ contains=SelectorKey,SelectorKey2,SelectorKey3
+  syntax match SelectorKey "'<\?\w*>\?'" contained
+  syntax match SelectorKey2 '<\w*>\t:\@=' contained
+  syntax match SelectorKey3
+      \ '\(\w\|<\|>\)\+\(,\(\w\|<\|>\)\+\)*\t:\@=' contained
+  highlight default link SelectorComment Comment
+  highlight default link SelectorKey Keyword
+  highlight default link SelectorKey2 Keyword
+  highlight default link SelectorKey3 Keyword
+endfunction
+
+
+" A default key mapping function -- not very useful.
+function! s:DefaultAfterKey(line, ...) abort
+  execute 'edit ' . a:line
 endfunction
 
 
@@ -282,93 +310,6 @@ endfunction
 
 
 ""
-" @public
-" @usage {infolist} [ResetMapper] [window_name] [window_position]
-" WARNING: This is a legacy function and will soon be deprecated and removed.
-" Open a selector window named [window_name] based on {infolist}, a list of
-" selector entries.
-"
-" Each entry in {infolist} may be either a line to display, or a 2-item list
-" containing [LINE, DATA]. If present, DATA will be passed to the action
-" function as a second argument.
-"
-" Entries are loaded into a new buffer-window located at [window_position], with
-" mappings loaded from `g:sw_key_mappings`, syntax applied via `g:Sw_SetSyntax`,
-" and window options applied using `g:Sw_SetExtraOptions`.
-"
-" [ResetMapper] is a function that says how to configure the selector with key
-" mappings and syntax settings via special variables `g:Sw_SetSyntax`,
-" `g:Sw_SetExtraOptions`, `g:sw_key_mappings`, `g:sw_min_win_height`, and
-" `g:sw_max_win_height`. (These special variables are actually local to the
-" selector and are cleared out before opening a new selector.)
-"
-" [ResetMapper] usually looks like the following: >
-"   function! MyResetMapper()
-"     let g:sw_key_mappings = {
-"         \ '<CR>' : [ 'MyOpenFunc', 'Close', 'Open a file'],
-"         \ 'd'    : [ 'MyDeleteFunc', 'Close', 'Delete a file']
-"         \ }
-"     let g:Sw_SetSyntax = 'MySyntaxResetter'
-"   endfunction
-" <
-"
-" @default window_name="__SelectorWindow__"
-" @default window_position="botright"
-function! selector#OpenWindow(infolist, ...) abort
-  let l:selector = selector#Create(a:infolist)
-  if a:0 >= 1
-    let l:ResetMapper = maktaba#ensure#IsCallable(a:1)
-    call s:DoLegacyConfig(l:selector, l:ResetMapper)
-  endif
-  if a:0 >= 2
-    call l:selector.WithName(maktaba#ensure#IsString(a:2))
-  endif
-  if has_key(g:, 'sw_key_mappings')
-    call l:selector.WithMappings(g:sw_key_mappings)
-  endif
-  let l:min_win_height = get(g:, 'sw_min_win_height', -1)
-  let l:max_win_height = get(g:, 'sw_max_win_height', -1)
-  if a:0 >= 3
-    let l:window_position = maktaba#ensure#IsString(a:3)
-    call l:selector.Show(l:min_win_height, l:max_win_height, l:window_position)
-  else
-    call l:selector.Show(l:min_win_height, l:max_win_height)
-  endif
-endfunction
-
-" Set the Window Options for the created window.
-function! s:SetWindowOptions(selector) abort
-  if v:version >= 700
-    setlocal buftype=nofile
-    setlocal bufhidden=delete
-    setlocal noswapfile
-    setlocal readonly
-    setlocal cursorline
-    setlocal nolist
-    setlocal nomodifiable
-    setlocal nospell
-  endif
-  call maktaba#function#Call(a:selector._ApplyExtraOptions)
-  if has('syntax')
-    call maktaba#function#Call(a:selector._ApplySyntax)
-    call s:BaseSyntax()
-  endif
-endfunction
-
-" Comment out lines -- used in creating help text
-function! s:CommentLines(str)
-  let l:out = []
-  for l:comment_lines in split(a:str, '\n')
-    if l:comment_lines[0] ==# '"'
-      call add(l:out, l:comment_lines)
-    else
-      call add(l:out, '" ' . l:comment_lines)
-    endif
-  endfor
-  return l:out
-endfunction
-
-""
 " @private
 " Get a list of header lines for the selector window that will be displayed as
 " comments at the top. Documents all key mappings if `self.verbose` is 1,
@@ -406,12 +347,14 @@ function! selector#DoGetHelpLines() dict abort
   endif
 endfunction
 
+
 ""
 " @private
 function! selector#ToggleCurrentHelp(...) abort
   let l:selector = s:selectors_by_buffer_number[bufnr('%')]
   call l:selector.ToggleHelp()
 endfunction
+
 
 ""
 " @dict Selector.ToggleHelp
@@ -429,6 +372,7 @@ function! selector#DoToggleHelp() dict abort
   let &modifiable = l:prev_mod
 endfunction
 
+
 " Initialize the key bindings
 function! s:InstantiateKeyMaps(mappings) abort
   for l:scrubbed_key in keys(a:mappings)
@@ -440,26 +384,13 @@ function! s:InstantiateKeyMaps(mappings) abort
   endfor
 endfunction
 
+
 ""
 " @private
 function! selector#DefaultExtraOptions() abort
   setlocal nonumber
 endfunction
 
-" The base syntax defines the comment syntax in the selector window, which is
-" used for the Help menus.
-function! s:BaseSyntax() abort
-  syntax region SelectorComment start='^"' end='$'
-      \ contains=SelectorKey,SelectorKey2,SelectorKey3
-  syntax match SelectorKey "'<\?\w*>\?'" contained
-  syntax match SelectorKey2 '<\w*>\t:\@=' contained
-  syntax match SelectorKey3
-      \ '\(\w\|<\|>\)\+\(,\(\w\|<\|>\)\+\)*\t:\@=' contained
-  highlight default link SelectorComment Comment
-  highlight default link SelectorKey Keyword
-  highlight default link SelectorKey2 Keyword
-  highlight default link SelectorKey3 Keyword
-endfunction
 
 ""
 " @private
@@ -471,6 +402,7 @@ function! selector#DefaultSetSyntax() abort
   highlight default link filepart Directory
   highlight default link javaext Function
 endfunction
+
 
 ""
 " @private
@@ -500,10 +432,6 @@ function! selector#KeyCall(scrubbed_key) abort
   endif
 endfunction
 
-" A default key mapping function -- not very useful.
-function! s:DefaultAfterKey(line, ...) abort
-  execute 'edit ' . a:line
-endfunction
 
 ""
 " @private
@@ -513,6 +441,7 @@ function! selector#CloseWindow() abort
   call selector#ReturnToWindow()
 endfunction
 
+
 ""
 " @private
 " Return the user to the previous window
@@ -521,6 +450,7 @@ function! selector#ReturnToWindow() abort
   call setpos('.', s:curpos_holder)
   call winrestview(s:current_savedview)
 endfunction
+
 
 ""
 " @private

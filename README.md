@@ -1,4 +1,4 @@
-selector is a utility to help plugin authors launch a window to choose one of
+# selector is a utility to help plugin authors launch a window to choose one of
 several options.
 
 For details, see the executable documentation in the `vroom/` directory or the
@@ -15,6 +15,12 @@ plugin-adding command is `Plugin`.
 " (The latter must be installed before it can be used.)
 Plugin 'google/maktaba'
 Plugin 'google/vim-selector'
+```
+
+# How to Use
+
+```
+:call selector#Create(['foo', 'bar']).Show()
 ```
 
 # Disclaimer
