@@ -398,7 +398,7 @@ function! selector#DoGetHelpLines() dict abort
     let l:lines = []
     for l:key in sort(keys(l:keys_comments))
       call extend(l:lines,
-          \ s:CommentLines(printf('%s\t: %s', l:key, l:keys_comments[l:key])))
+          \ s:CommentLines(printf("%s\t: %s", l:key, l:keys_comments[l:key])))
     endfor
     return l:lines
   else
