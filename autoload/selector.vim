@@ -418,15 +418,13 @@ endfunction
 " Toggle whether verbose help is shown for the selector.
 function! selector#DoToggleHelp() dict abort
   " TODO(dbarnett): Don't modify buffer if none exists.
-  let l:prev_read = &readonly
-  let l:prev_mod = &modifiable
   setlocal noreadonly
   setlocal modifiable
   let l:len_help = len(self._GetHelpLines())
   let self._is_verbose = !self._is_verbose
   call maktaba#buffer#Overwrite(1, l:len_help, self._GetHelpLines())
-  let &readonly = l:prev_read
-  let &modifiable = l:prev_mod
+  setlocal readonly
+  setlocal nomodifiable
 endfunction
 
 " Initialize the key bindings
