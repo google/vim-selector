@@ -45,11 +45,11 @@ buffers easily.
   @end
 
 
-Now we can use selector#Create to create a new buffer with multiple lines
-that can be selected.
+Now we can use maktaba#selector#Create to create a new buffer with multiple
+lines that can be selected.
 
   :let g:lines = ["one/one.1", "two/two.2", "three/three.3"]
-  :let g:selector = selector#Create(g:lines)
+  :let g:selector = maktaba#selector#Create(g:lines)
   |.WithMappings(g:example_keys).WithSyntax(function('HandleResetSyntax'))
   |.WithName('Window_Name')
   |.Show()
@@ -96,20 +96,3 @@ Lets go back to the selector window and then try running the close handler.
 
 
 
-There's also a legacy selector#OpenWindow API to accomplish the same thing.
-
-  :function HandleResetState() abort<CR>
-  |  let g:sw_key_mappings = g:example_keys<CR>
-  |  let g:Sw_SetSyntax = 'HandleResetSyntax'<CR>
-  |endfunction<CR>
-
-  :let g:lines = ["one/one.1", "two/two.2", "three/three.3"]
-  :call selector#OpenWindow(g:lines, 'HandleResetState', 'Window_Name',
-  | 'botright')
-  " Press 'H' for more options.
-  one/one.1
-  two/two.2
-  three/three.3
-  @end
-
-But this will be removed soon, so you shouldn't use it.
